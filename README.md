@@ -44,7 +44,7 @@ LISTEN_ADDR=0.0.0.0:8080
 ```bash
 docker run --name mysql-realms \
   -e MYSQL_ROOT_PASSWORD=yourpassword \
-  -e MYSQL_DATABASE=realmsdb \
+  -e MYSQL_DATABASE=realms \
   -p 3306:3306 \
   -d mysql:8.0
 ```
