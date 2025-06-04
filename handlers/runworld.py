@@ -37,11 +37,12 @@ async def monitor_players(rcon_port, container_name, world):
         return
 
     try:
-        admins = json.loads(world.admins) if world.admins else []
-        players = json.loads(world.players) if world.players else []
+        admins = json.loads(world.admins) if isinstance(world.admins, str) and world.admins else (world.admins if isinstance(world.admins, list) else [])
+        players = json.loads(world.players) if isinstance(world.players, str) and world.players else (world.players if isinstance(world.players, list) else [])
+
         setup_admins_and_whitelist(rcon_port, admins, players, RCON_PASSWORD)
     except Exception as e:
-        print(f"Error while giving op/whitelist: {e}")
+        print(f"Ошибка при выдаче op/whitelist: {e}")
 
     last_players = time.time()
     check_interval = 60
