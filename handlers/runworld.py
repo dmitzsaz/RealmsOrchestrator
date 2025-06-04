@@ -3,7 +3,7 @@ import docker
 import asyncio
 from mcrcon import MCRcon
 import os
-from utils import get_free_port, download_from_r2, extract_object_name, setup_admins_and_whitelist, zip_and_upload_world
+from utils import get_free_port, download_from_r2, extract_object_name, setup_admins_and_whitelist, zip_and_upload_world, fix_permissions
 import zipfile
 from database.crud import get_world, update_world
 import time
@@ -70,6 +70,21 @@ async def monitor_players(rcon_port, container_name, world):
             print(f"RCON error: {e}")
         await asyncio.sleep(check_interval)
 
+async def getDockerContainer(world_name):
+    containers = docker_client.containers.list(all=True)
+    for c in containers:
+        if c.name == world_name:
+            return c
+    return None
+
+def prepareResponse(container):
+    ports = container.attrs.get('NetworkSettings', {}).get('Ports', {})
+    return web.json_response({
+        "status": container.status,
+        "container_id": container.id,
+        "mc_port": ports.get("25565/tcp", [{}])[0].get("HostPort") if ports.get("25565/tcp") else None,
+        "rcon_port": ports.get("25575/tcp", [{}])[0].get("HostPort") if ports.get("25575/tcp") else None
+
 async def runworld(request):
     world_id = request.match_info.get("world_id")
     world = get_world(world_id)
@@ -80,16 +95,18 @@ async def runworld(request):
 
     world_name = f"minecraft_{world_id}"
 
-    containers = docker_client.containers.list(all=True)
-    for c in containers:
-        if c.name == world_name:
-            ports = c.attrs.get('NetworkSettings', {}).get('Ports', {})
-            return web.json_response({
-                "status": c.status,
-                "container_id": c.id,
-                "mc_port": ports.get("25565/tcp", [{}])[0].get("HostPort") if ports.get("25565/tcp") else None,
-                "rcon_port": ports.get("25575/tcp", [{}])[0].get("HostPort") if ports.get("25575/tcp") else None
-            })
+    if world.status == "init" or world.status == "running":
+        while True:
+            container = await getDockerContainer(world_name)
+            if container:
+                return prepareResponse(container)
+            await asyncio.sleep(1)
+
+    update_world(world_id, status="init")
+
+    container = await getDockerContainer(world_name)
+    if container:
+        return prepareResponse(container)
 
     s3_url = world.s3URL
     world_dir = os.path.join(WORLDS_DIR, world_name)
@@ -104,6 +121,8 @@ async def runworld(request):
     os.remove(archive_path)
 
     abs_world_dir = os.path.abspath(world_dir)
+
+    fix_permissions(abs_world_dir)
 
     mc_port = get_free_port()
     rcon_port = get_free_port()
@@ -126,6 +145,8 @@ async def runworld(request):
             abs_world_dir: {"bind": "/data/world", "mode": "rw"}
         }
     )
+
+    update_world(world_id, status="running")
 
     asyncio.create_task(monitor_players(rcon_port, world_name, world))
 

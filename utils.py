@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from mcrcon import MCRcon
 import zipfile
+import subprocess
 
 def extract_object_name(s3_url):
     return urlparse(s3_url).path.lstrip('/')
@@ -105,3 +106,6 @@ async def zip_and_upload_world(world_dir: str, r2_name: str = None) -> str:
     s3_url = await upload_to_r2(temp_zip, r2_name)
     os.remove(temp_zip)
     return s3_url
+
+def fix_permissions(world_dir):
+    subprocess.run(['chmod', '-R', '777', world_dir])
