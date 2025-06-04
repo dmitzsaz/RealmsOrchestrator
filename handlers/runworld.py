@@ -83,7 +83,9 @@ def prepareResponse(container):
         "status": container.status,
         "container_id": container.id,
         "mc_port": ports.get("25565/tcp", [{}])[0].get("HostPort") if ports.get("25565/tcp") else None,
-        "rcon_port": ports.get("25575/tcp", [{}])[0].get("HostPort") if ports.get("25575/tcp") else None
+        "rcon_port": ports.get("25575/tcp", [{}])[0].get("HostPort") if ports.get("25575/tcp") else None,
+        "status": container.status
+    })
 
 async def runworld(request):
     world_id = request.match_info.get("world_id")
