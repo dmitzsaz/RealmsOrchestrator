@@ -16,8 +16,7 @@ async def background_save_world(world_id, world_name):
     else:
         update_world(world_id, status="idle")
 
-async def stopworld(request):
-    world_id = request.match_info.get("world_id")
+async def stopworld(world_id):
     world_name = f"minecraft_{world_id}"
     world = get_world(world_id)
     if not world:
@@ -31,7 +30,18 @@ async def stopworld(request):
                 update_world(world_id, status="updating")
                 asyncio.create_task(background_save_world(world_id, world_name))
                 c.remove()
-                return web.json_response({"result": f"World {world_id} stopped, saving to R2 in background, status set to updating"})
+                return True
             except Exception as e:
-                return web.json_response({"error": str(e)}, status=500)
-    return web.json_response({"error": "Container not found"}, status=404)
+                return str(e)
+    return False
+
+async def stopworldRequest(request):
+    world_id = request.match_info.get("world_id")
+    result = await stopworld(world_id)
+    if type(result) == bool:
+        if result:
+            return web.json_response({"result": f"World {world_id} stopped, saving to R2 in background, status set to updating"})
+        else:
+            return web.json_response({"error": "Container not found"}, status=404)
+    else:
+        return web.json_response({"error": result}, status=500)

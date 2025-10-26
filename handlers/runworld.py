@@ -6,6 +6,7 @@ import os
 from utils import get_free_port, download_from_r2, extract_object_name, setup_admins_and_whitelist, zip_and_upload_world, fix_permissions
 import zipfile
 from database.crud import get_world, update_world
+from handlers.stopworld import stopworld
 import time
 import json
 
@@ -42,7 +43,7 @@ async def monitor_players(rcon_port, container_name, world):
 
         setup_admins_and_whitelist(rcon_port, admins, players, RCON_PASSWORD)
     except Exception as e:
-        print(f"Ошибка при выдаче op/whitelist: {e}")
+        print(f"Error setting up admins and whitelist: {e}")
 
     last_players = time.time()
     check_interval = 60
@@ -54,21 +55,18 @@ async def monitor_players(rcon_port, container_name, world):
                 resp = mcr.command("list")
                 if "There are 0" in resp:
                     if time.time() - last_players >= empty_timeout:
-                        container = docker_client.containers.get(container_name)
-                        container.stop()
-                        update_world(world.id, status="updating")
-                        world_dir = os.path.abspath(os.path.join(WORLDS_DIR, container_name))
-                        if os.path.exists(world_dir):
-                            s3_url = await zip_and_upload_world(world_dir, f"mc_world_{world.id}.zip")
-                            update_world(world.id, s3URL=s3_url, status="idle")
-                        else:
-                            update_world(world.id, status="idle")
-                        container.remove()
+                        await stopworld(world_id)
                         break
                 else:
                     last_players = time.time()
         except Exception as e:
-            print(f"RCON error: {e}")
+            container = docker_client.containers.get(container_name)
+            if not container or container.status == "exited":
+                print(f"Container {container_name} is dead, uploading world {world_id} to R2")
+                await stopworld(world_id)
+                break
+            else:
+                print(f"Error monitoring players: {e}")
         await asyncio.sleep(check_interval)
 
 async def getDockerContainer(world_name):
