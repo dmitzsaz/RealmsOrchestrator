@@ -13,3 +13,4 @@ class World(Base):
     status = Column(String(255), nullable=False)
     admins = Column(JSON, nullable=False, default=list)
     players = Column(JSON, nullable=False, default=list)
+    params = Column(JSON, nullable=False, default={})

@@ -33,8 +33,4 @@ routes = [
 ]
 
 app.add_routes(routes)
-
-listen_addr = settings.LISTEN_ADDR.split(":")
-listen_port = int(listen_addr[1])
-listen_host = listen_addr[0]
-web.run_app(app, host=listen_host, port=listen_port)
+web.run_app(app, host=settings.LISTEN_ADDR, port=settings.LISTEN_PORT)

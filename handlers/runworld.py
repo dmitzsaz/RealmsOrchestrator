@@ -101,14 +101,15 @@ async def runworld(request):
     if world.status == "init" or world.status == "running":
         while True:
             container = await getDockerContainer(world_name)
-            if container:
-                return prepareResponse(container)
+            if not container or container.status == "exited":
+                break
+            return prepareResponse(container)
             await asyncio.sleep(1)
 
     update_world(world_id, status="init")
 
     container = await getDockerContainer(world_name)
-    if container:
+    if container and container.status != "exited":
         return prepareResponse(container)
 
     s3_url = world.s3URL
@@ -130,6 +131,13 @@ async def runworld(request):
     mc_port = get_free_port()
     rcon_port = get_free_port()
 
+    params = {
+        "TYPE": "FABRIC",
+        "MODRINTH_PROJECTS": "fabric-api,lithium"
+    }
+    if world.params != {}:
+        params.update(world.params)
+
     container = docker_client.containers.run(
         DOCKER_IMAGE,
         name=f"minecraft_{world_id}",
@@ -142,7 +150,8 @@ async def runworld(request):
             "RCON_PORT": 25575,
             "SERVER_PORT": 25565,
             "ENABLE_COMMAND_BLOCK": "true",
-            "MAX_PLAYERS": 5
+            "MAX_PLAYERS": 5,
+            **params
         },
         volumes={
             abs_world_dir: {"bind": "/data/world", "mode": "rw"}
