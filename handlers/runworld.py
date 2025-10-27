@@ -135,10 +135,11 @@ async def runworld(request):
     }
     if world.params != {}:
         params.update(world.params)
+    paramsFormatted = {k.upper(): v for k, v in params.items()}
 
     container = docker_client.containers.run(
         DOCKER_IMAGE,
-        name=f"minecraft_{world_id}",
+        name=f"minecraft_{world_id}_{world.domainPrefix}",
         detach=True,
         ports={"25565/tcp": mc_port, "25575/tcp": rcon_port},
         environment={
@@ -149,7 +150,7 @@ async def runworld(request):
             "SERVER_PORT": 25565,
             "ENABLE_COMMAND_BLOCK": "true",
             "MAX_PLAYERS": 5,
-            **params
+            **paramsFormatted
         },
         volumes={
             abs_world_dir: {"bind": "/data/world", "mode": "rw"}

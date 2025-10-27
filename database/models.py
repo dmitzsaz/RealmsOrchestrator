@@ -14,3 +14,4 @@ class World(Base):
     admins = Column(JSON, nullable=False, default=list)
     players = Column(JSON, nullable=False, default=list)
     params = Column(JSON, nullable=False, default={})
+    domainPrefix = Column(String(255), nullable=True, unique=False)
