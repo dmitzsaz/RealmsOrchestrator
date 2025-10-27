@@ -56,15 +56,15 @@ async def monitor_players(rcon_port, container_name, world):
                 resp = mcr.command("list")
                 if "There are 0" in resp:
                     if time.time() - last_players >= empty_timeout:
-                        await stopworld(world_id)
+                        await stopworld(world.id)
                         break
                 else:
                     last_players = time.time()
         except Exception as e:
             container = docker_client.containers.get(container_name)
             if not container or container.status == "exited":
-                print(f"Container {container_name} is dead, uploading world {world_id} to R2")
-                await stopworld(world_id)
+                print(f"Container {container_name} is dead, uploading world {world.id} to R2")
+                await stopworld(world.id)
                 break
             else:
                 print(f"Error monitoring players: {e}")
