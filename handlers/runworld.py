@@ -7,6 +7,7 @@ from utils import get_free_port, download_from_r2, extract_object_name, setup_ad
 import zipfile
 from database.crud import get_world, update_world
 from handlers.stopworld import stopworld
+from config import settings
 import time
 import json
 
