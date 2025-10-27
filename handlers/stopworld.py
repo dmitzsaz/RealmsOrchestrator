@@ -17,10 +17,11 @@ async def background_save_world(world_id, world_name):
         update_world(world_id, status="idle")
 
 async def stopworld(world_id):
-    world_name = f"minecraft_{world_id}"
     world = get_world(world_id)
     if not world:
         return "World not found"
+        
+    world_name = f"minecraft_{world.id}_{world.domainPrefix}"
 
     containers = docker_client.containers.list(all=True)
     for c in containers:
