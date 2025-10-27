@@ -95,7 +95,7 @@ async def runworld(request):
     if world.status == "updating":
         return web.json_response({"error": "World is currently being updated. Please try again later."}, status=409)
 
-    world_name = f"minecraft_{world_id}"
+    world_name = f"minecraft_{world_id}_{world.domainPrefix}"
 
     if world.status == "init" or world.status == "running":
         while True:
