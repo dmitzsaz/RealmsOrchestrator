@@ -161,9 +161,14 @@ async def runworld(request):
 
     asyncio.create_task(monitor_players(rcon_port, world_name, world))
 
+    domain = None
+    if world.domainPrefix != None and settings.BASE_DOMAIN != "undefined":
+        domain = f"{world.domainPrefix}.{settings.BASE_DOMAIN}"
+
     return web.json_response({
         "status": "started",
         "container_id": container.id,
         "mc_port": mc_port,
-        "rcon_port": rcon_port
+        "rcon_port": rcon_port,
+        "domain": domain
     })

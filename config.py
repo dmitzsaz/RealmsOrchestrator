@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     LISTEN_ADDR: list[str] = ["0.0.0.0", "::"]
     LISTEN_PORT: int = 8080
 
+    BASE_DOMAIN: str = "undefined"
+
     DB_USER_NAME: str = "root"
     DB_ROOT_PASSWORD: str
     DB_NAME: str = "realms"

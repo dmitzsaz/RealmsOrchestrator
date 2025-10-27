@@ -2,41 +2,36 @@ from typing import Optional, List
 from .db import SessionLocal
 from .models import World
 
-# Получить все миры
 def get_worlds() -> List[World]:
     with SessionLocal() as session:
         return session.query(World).all()
 
-# Получить мир по id
 def get_world(world_id: int) -> Optional[World]:
     with SessionLocal() as session:
         return session.query(World).filter(World.id == world_id).first()
 
-# Создать новый мир
-def create_world(name: str, s3URL: str, status: str = "stopped") -> World:
+def create_world(name: str, s3URL: str, status: str = "stopped", params: dict = {}, domainPrefix: str = None) -> World:
     with SessionLocal() as session:
-        world = World(name=name, s3URL=s3URL, status=status)
+        world = World(name=name, s3URL=s3URL, status=status, params=params, domainPrefix=domainPrefix)
         session.add(world)
         session.commit()
         session.refresh(world)
         return world
 
-# Обновить мир
 def update_world(world_id: int, **kwargs) -> World:
     with SessionLocal() as session:
         world = session.query(World).filter(World.id == world_id).first()
         if not world:
-            raise ValueError("Мир не найден")
+            raise ValueError("World not found")
         for key, value in kwargs.items():
             if hasattr(world, key):
                 setattr(world, key, value)
             else:
-                raise ValueError(f"Некорректный атрибут: {key}")
+                raise ValueError(f"Invalid attribute: {key}")
         session.commit()
         session.refresh(world)
         return world
 
-# Удалить мир
 def delete_world(world_id: int) -> bool:
     with SessionLocal() as session:
         world = session.query(World).filter(World.id == world_id).first()

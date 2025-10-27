@@ -20,7 +20,7 @@ async def stopworld(world_id):
     world_name = f"minecraft_{world_id}"
     world = get_world(world_id)
     if not world:
-        return web.json_response({"error": "World not found"}, status=404)
+        return "World not found"
 
     containers = docker_client.containers.list(all=True)
     for c in containers:

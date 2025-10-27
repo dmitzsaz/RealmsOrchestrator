@@ -2,7 +2,7 @@ from aiohttp import web
 
 from handlers.worlds import worlds
 from handlers.runworld import runworld
-from handlers.stopworld import stopworld
+from handlers.stopworld import stopworldRequest
 from handlers.currentworlds import currentworlds
 from handlers.getworldlink import getworldlink
 from handlers.createworld import createworld
@@ -22,7 +22,7 @@ routes = [
     web.get('/', index),
     web.get('/worlds', worlds),
     web.get('/worlds/{world_id}/start', runworld),
-    web.get('/worlds/{world_id}/stop', stopworld),
+    web.get('/worlds/{world_id}/stop', stopworldRequest),
     web.get('/worlds/active', currentworlds),
     web.get('/worlds/{world_id}/download', getworldlink),
     web.post('/createworld', createworld),
