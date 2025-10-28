@@ -83,6 +83,9 @@ def get_free_port():
         return s.getsockname()[1]
 
 def setup_admins_and_whitelist(rcon_port, admins, players, rcon_password):
+    if settings.OFFLINEMODE_ALTWHITELIST:
+        return
+
     with MCRcon("localhost", rcon_password, port=rcon_port) as mcr:
         mcr.command("whitelist on")
         for admin in admins:
@@ -90,6 +93,13 @@ def setup_admins_and_whitelist(rcon_port, admins, players, rcon_password):
             mcr.command(f"op {admin}")
         for player in players:
             mcr.command(f"whitelist add {player}")
+
+def givePlayerOp(rcon_port, player, rcon_password):
+    if settings.OFFLINEMODE_ALTWHITELIST != True:
+        return
+        
+    with MCRcon("localhost", rcon_password, port=rcon_port) as mcr:
+        mcr.command(f"op {player}")
 
 async def zip_and_upload_world(world_dir: str, r2_name: str = None) -> str:
     if not r2_name:

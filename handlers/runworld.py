@@ -3,7 +3,7 @@ import docker
 import asyncio
 from mcrcon import MCRcon
 import os
-from utils import get_free_port, download_from_r2, extract_object_name, setup_admins_and_whitelist, zip_and_upload_world, fix_permissions
+from utils import get_free_port, download_from_r2, extract_object_name, setup_admins_and_whitelist, zip_and_upload_world, fix_permissions, givePlayerOp
 import zipfile
 from database.crud import get_world, update_world
 from handlers.stopworld import stopworld
@@ -50,10 +50,25 @@ async def monitor_players(rcon_port, container_name, world):
     check_interval = 60
     empty_timeout = 5 * 60
 
+    currentPlayers = []
+
     while True:
         try:
             with MCRcon("localhost", RCON_PASSWORD, port=rcon_port) as mcr:
                 resp = mcr.command("list")
+
+                if settings.OFFLINEMODE_ALTWHITELIST and world.params.get("OFFLINE_MODE", False):
+                    players_part = resp.split(":", 1)[1].strip() if ":" in resp else ""
+                    if players_part:
+                        currentPlayers = [p.strip() for p in players_part.split(",") if p.strip()]
+                    else:
+                        currentPlayers = []
+
+                    if currentPlayers != players:
+                        for player in currentPlayers:
+                            if player in world.admins and player not in players:
+                                await givePlayerOp(rcon_port, player, RCON_PASSWORD)
+
                 if "There are 0" in resp:
                     if time.time() - last_players >= empty_timeout:
                         await stopworld(world.id)

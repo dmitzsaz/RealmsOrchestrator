@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     LISTEN_PORT: int = 8080
 
     BASE_DOMAIN: str = "undefined"
+    OFFLINEMODE_ALTWHITELIST: bool = False
 
     DB_USER_NAME: str = "root"
     DB_ROOT_PASSWORD: str
