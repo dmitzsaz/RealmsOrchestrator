@@ -189,6 +189,9 @@ async def runworld(request):
     if world.domainPrefix != None and settings.BASE_DOMAIN != "undefined":
         domain = f"{world.domainPrefix}.{settings.BASE_DOMAIN}"
 
+    if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
+        mc_port = None
+
     return web.json_response({
         "status": "started",
         "container_id": container.id,
