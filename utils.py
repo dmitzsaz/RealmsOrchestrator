@@ -82,8 +82,8 @@ def get_free_port():
         s.bind(('', 0))
         return s.getsockname()[1]
 
-def setup_admins_and_whitelist(rcon_port, admins, players, rcon_password):
-    if settings.OFFLINEMODE_ALTWHITELIST:
+def setup_admins_and_whitelist(rcon_port, admins, players, rcon_password, world):
+    if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
         return
 
     with MCRcon("localhost", rcon_password, port=rcon_port) as mcr:

@@ -42,7 +42,7 @@ async def monitor_players(rcon_port, container_name, world):
         admins = json.loads(world.admins) if isinstance(world.admins, str) and world.admins else (world.admins if isinstance(world.admins, list) else [])
         players = json.loads(world.players) if isinstance(world.players, str) and world.players else (world.players if isinstance(world.players, list) else [])
 
-        setup_admins_and_whitelist(rcon_port, admins, players, RCON_PASSWORD)
+        setup_admins_and_whitelist(rcon_port, admins, players, RCON_PASSWORD, world)
     except Exception as e:
         print(f"Error setting up admins and whitelist: {e}")
 
@@ -95,11 +95,14 @@ async def getDockerContainer(world_name):
 
 def prepareResponse(container):
     ports = container.attrs.get('NetworkSettings', {}).get('Ports', {})
+    mc_port = ports.get("25565/tcp", [{}])[0].get("HostPort") if ports.get("25565/tcp") else None
+    rcon_port = ports.get("25575/tcp", [{}])[0].get("HostPort") if ports.get("25575/tcp") else None
+
     return web.json_response({
         "status": container.status,
         "container_id": container.id,
-        "mc_port": ports.get("25565/tcp", [{}])[0].get("HostPort") if ports.get("25565/tcp") else None,
-        "rcon_port": ports.get("25575/tcp", [{}])[0].get("HostPort") if ports.get("25575/tcp") else None,
+        "mc_port": int(mc_port),
+        "rcon_port": int(rcon_port),
         "status": container.status
     })
 
@@ -154,11 +157,15 @@ async def runworld(request):
         params.update(world.params)
     paramsFormatted = {k.upper(): v for k, v in params.items()}
 
+    ports = {"25565/tcp": mc_port, "25575/tcp": rcon_port}
+    if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
+        del ports["25565/tcp"]
+
     container = docker_client.containers.run(
         DOCKER_IMAGE,
         name=f"minecraft_{world_id}_{world.domainPrefix}",
         detach=True,
-        ports={"25565/tcp": mc_port, "25575/tcp": rcon_port},
+        ports=ports,
         environment={
             "EULA": "TRUE",
             "ENABLE_RCON": "true",
