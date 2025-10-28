@@ -67,7 +67,7 @@ async def monitor_players(rcon_port, container_name, world):
                     if currentPlayers != players:
                         for player in players:
                             if player in world.admins and player not in currentPlayers:
-                                await givePlayerOp(rcon_port, player, RCON_PASSWORD)
+                                givePlayerOp(rcon_port, player, RCON_PASSWORD)
                         currentPlayers = players
 
                 if "There are 0" in resp:
