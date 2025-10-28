@@ -47,7 +47,7 @@ async def monitor_players(rcon_port, container_name, world):
         print(f"Error setting up admins and whitelist: {e}")
 
     last_players = time.time()
-    check_interval = 60
+    check_interval = 5
     empty_timeout = 5 * 60
 
     currentPlayers = []
@@ -57,7 +57,7 @@ async def monitor_players(rcon_port, container_name, world):
             with MCRcon("localhost", RCON_PASSWORD, port=rcon_port) as mcr:
                 resp = mcr.command("list")
 
-                if settings.OFFLINEMODE_ALTWHITELIST and world.params.get("ONLINE_MODE", True) == False:
+                if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", True) == "false" or world.params.get("online_mode", True) == "false"):
                     players_part = resp.split(":", 1)[1].strip() if ":" in resp else ""
                     if players_part:
                         currentPlayers = [p.strip() for p in players_part.split(",") if p.strip()]
