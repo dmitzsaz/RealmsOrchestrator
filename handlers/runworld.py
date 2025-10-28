@@ -60,14 +60,15 @@ async def monitor_players(rcon_port, container_name, world):
                 if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
                     players_part = resp.split(":", 1)[1].strip() if ":" in resp else ""
                     if players_part:
-                        currentPlayers = [p.strip() for p in players_part.split(",") if p.strip()]
+                        players = [p.strip() for p in players_part.split(",") if p.strip()]
                     else:
-                        currentPlayers = []
+                        players = []
 
                     if currentPlayers != players:
-                        for player in currentPlayers:
-                            if player in world.admins and player not in players:
+                        for player in players:
+                            if player in world.admins and player not in currentPlayers:
                                 await givePlayerOp(rcon_port, player, RCON_PASSWORD)
+                        currentPlayers = players
 
                 if "There are 0" in resp:
                     if time.time() - last_players >= empty_timeout:
