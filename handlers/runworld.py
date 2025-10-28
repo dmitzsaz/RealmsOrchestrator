@@ -57,7 +57,7 @@ async def monitor_players(rcon_port, container_name, world):
             with MCRcon("localhost", RCON_PASSWORD, port=rcon_port) as mcr:
                 resp = mcr.command("list")
 
-                if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", True) == "false" or world.params.get("online_mode", True) == "false"):
+                if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
                     players_part = resp.split(":", 1)[1].strip() if ":" in resp else ""
                     if players_part:
                         currentPlayers = [p.strip() for p in players_part.split(",") if p.strip()]
