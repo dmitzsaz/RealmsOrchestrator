@@ -12,6 +12,9 @@ from mcrcon import MCRcon
 import zipfile
 import subprocess
 
+DEFAULT_LEVEL_NAME = "world"
+SERVER_DATA_DIR_NAME = "data"
+
 def extract_object_name(s3_url):
     return urlparse(s3_url).path.lstrip('/')
 
@@ -119,3 +122,24 @@ async def zip_and_upload_world(world_dir: str, r2_name: str = None) -> str:
 
 def fix_permissions(world_dir):
     subprocess.run(['chmod', '-R', '777', world_dir])
+
+def get_level_name(world):
+    params = getattr(world, "params", None)
+    if not isinstance(params, dict):
+        return DEFAULT_LEVEL_NAME
+    return str(params.get("LEVEL_NAME") or params.get("level_name") or DEFAULT_LEVEL_NAME)
+
+def get_world_runtime_dir(worlds_dir, world_name):
+    return os.path.abspath(os.path.join(worlds_dir, world_name))
+
+def get_server_data_dir(worlds_dir, world_name):
+    return os.path.join(get_world_runtime_dir(worlds_dir, world_name), SERVER_DATA_DIR_NAME)
+
+def get_server_world_dir(worlds_dir, world_name, world):
+    return os.path.join(get_server_data_dir(worlds_dir, world_name), get_level_name(world))
+
+def looks_like_world_dir(world_dir):
+    return (
+        os.path.isfile(os.path.join(world_dir, "level.dat")) or
+        os.path.isdir(os.path.join(world_dir, "region"))
+    )

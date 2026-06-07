@@ -3,8 +3,19 @@ import docker
 import asyncio
 from mcrcon import MCRcon
 import os
-from utils import get_free_port, download_from_r2, extract_object_name, setup_admins_and_whitelist, zip_and_upload_world, fix_permissions, givePlayerOp
+from utils import (
+    get_free_port,
+    download_from_r2,
+    extract_object_name,
+    setup_admins_and_whitelist,
+    fix_permissions,
+    givePlayerOp,
+    get_world_runtime_dir,
+    get_server_data_dir,
+    get_server_world_dir,
+)
 import zipfile
+import shutil
 from database.crud import get_world, update_world
 from handlers.stopworld import stopworld
 from config import settings
@@ -115,6 +126,14 @@ async def runworld(request):
         return web.json_response({"error": "World is currently being updated. Please try again later."}, status=409)
 
     world_name = f"minecraft_{world_id}_{world.domainPrefix}"
+    world_params = world.params if isinstance(world.params, dict) else {}
+    params = {
+        "TYPE": "FABRIC",
+        "MODRINTH_PROJECTS": "fabric-api,lithium"
+    }
+    if world_params != {}:
+        params.update(world_params)
+    paramsFormatted = {k.upper(): v for k, v in params.items()}
 
     if world.status == "init" or world.status == "running":
         while True:
@@ -127,38 +146,35 @@ async def runworld(request):
     update_world(world_id, status="init")
 
     container = await getDockerContainer(world_name)
-    if container and container.status != "exited":
-        return prepareResponse(container)
+    if container:
+        if container.status != "exited":
+            return prepareResponse(container)
+        container.remove()
 
     s3_url = world.s3URL
-    world_dir = os.path.join(WORLDS_DIR, world_name)
-    os.makedirs(world_dir, exist_ok=True)
+    runtime_dir = get_world_runtime_dir(WORLDS_DIR, world_name)
+    data_dir = get_server_data_dir(WORLDS_DIR, world_name)
+    world_dir = get_server_world_dir(WORLDS_DIR, world_name, world)
 
     archive_path = os.path.join(WORLDS_DIR, f"{world_name}.zip")
     object_name = extract_object_name(s3_url)
     download_from_r2(object_name, archive_path)
 
+    if os.path.exists(runtime_dir):
+        shutil.rmtree(runtime_dir)
+    os.makedirs(world_dir, exist_ok=True)
+
     with zipfile.ZipFile(archive_path, 'r') as zip_ref:
         zip_ref.extractall(world_dir)
     os.remove(archive_path)
 
-    abs_world_dir = os.path.abspath(world_dir)
-
-    fix_permissions(abs_world_dir)
+    fix_permissions(data_dir)
 
     mc_port = get_free_port()
     rcon_port = get_free_port()
 
-    params = {
-        "TYPE": "FABRIC",
-        "MODRINTH_PROJECTS": "fabric-api,lithium"
-    }
-    if world.params != {}:
-        params.update(world.params)
-    paramsFormatted = {k.upper(): v for k, v in params.items()}
-
     ports = {"25565/tcp": mc_port, "25575/tcp": rcon_port}
-    if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
+    if settings.OFFLINEMODE_ALTWHITELIST and (world_params.get("ONLINE_MODE", "true") == "false" or world_params.get("online_mode", "true") == "false"):
         del ports["25565/tcp"]
 
     container = docker_client.containers.run(
@@ -177,7 +193,7 @@ async def runworld(request):
             **paramsFormatted
         },
         volumes={
-            abs_world_dir: {"bind": "/data/world", "mode": "rw"}
+            data_dir: {"bind": "/data", "mode": "rw"}
         }
     )
 
@@ -189,7 +205,7 @@ async def runworld(request):
     if world.domainPrefix != None and settings.BASE_DOMAIN != "undefined":
         domain = f"{world.domainPrefix}.{settings.BASE_DOMAIN}"
 
-    if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
+    if settings.OFFLINEMODE_ALTWHITELIST and (world_params.get("ONLINE_MODE", "true") == "false" or world_params.get("online_mode", "true") == "false"):
         mc_port = None
 
     return web.json_response({

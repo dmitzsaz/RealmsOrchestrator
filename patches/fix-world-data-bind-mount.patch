@@ -1,0 +1,215 @@
+diff --git a/handlers/runworld.py b/handlers/runworld.py
+index fb27a0e..7fcdcd2 100644
+--- a/handlers/runworld.py
++++ b/handlers/runworld.py
+@@ -3,8 +3,19 @@ import docker
+ import asyncio
+ from mcrcon import MCRcon
+ import os
+-from utils import get_free_port, download_from_r2, extract_object_name, setup_admins_and_whitelist, zip_and_upload_world, fix_permissions, givePlayerOp
++from utils import (
++    get_free_port,
++    download_from_r2,
++    extract_object_name,
++    setup_admins_and_whitelist,
++    fix_permissions,
++    givePlayerOp,
++    get_world_runtime_dir,
++    get_server_data_dir,
++    get_server_world_dir,
++)
+ import zipfile
++import shutil
+ from database.crud import get_world, update_world
+ from handlers.stopworld import stopworld
+ from config import settings
+@@ -115,6 +126,14 @@ async def runworld(request):
+         return web.json_response({"error": "World is currently being updated. Please try again later."}, status=409)
+ 
+     world_name = f"minecraft_{world_id}_{world.domainPrefix}"
++    world_params = world.params if isinstance(world.params, dict) else {}
++    params = {
++        "TYPE": "FABRIC",
++        "MODRINTH_PROJECTS": "fabric-api,lithium"
++    }
++    if world_params != {}:
++        params.update(world_params)
++    paramsFormatted = {k.upper(): v for k, v in params.items()}
+ 
+     if world.status == "init" or world.status == "running":
+         while True:
+@@ -127,38 +146,35 @@ async def runworld(request):
+     update_world(world_id, status="init")
+ 
+     container = await getDockerContainer(world_name)
+-    if container and container.status != "exited":
+-        return prepareResponse(container)
++    if container:
++        if container.status != "exited":
++            return prepareResponse(container)
++        container.remove()
+ 
+     s3_url = world.s3URL
+-    world_dir = os.path.join(WORLDS_DIR, world_name)
+-    os.makedirs(world_dir, exist_ok=True)
++    runtime_dir = get_world_runtime_dir(WORLDS_DIR, world_name)
++    data_dir = get_server_data_dir(WORLDS_DIR, world_name)
++    world_dir = get_server_world_dir(WORLDS_DIR, world_name, world)
+ 
+     archive_path = os.path.join(WORLDS_DIR, f"{world_name}.zip")
+     object_name = extract_object_name(s3_url)
+     download_from_r2(object_name, archive_path)
+ 
++    if os.path.exists(runtime_dir):
++        shutil.rmtree(runtime_dir)
++    os.makedirs(world_dir, exist_ok=True)
++
+     with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+         zip_ref.extractall(world_dir)
+     os.remove(archive_path)
+ 
+-    abs_world_dir = os.path.abspath(world_dir)
+-
+-    fix_permissions(abs_world_dir)
++    fix_permissions(data_dir)
+ 
+     mc_port = get_free_port()
+     rcon_port = get_free_port()
+ 
+-    params = {
+-        "TYPE": "FABRIC",
+-        "MODRINTH_PROJECTS": "fabric-api,lithium"
+-    }
+-    if world.params != {}:
+-        params.update(world.params)
+-    paramsFormatted = {k.upper(): v for k, v in params.items()}
+-
+     ports = {"25565/tcp": mc_port, "25575/tcp": rcon_port}
+-    if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
++    if settings.OFFLINEMODE_ALTWHITELIST and (world_params.get("ONLINE_MODE", "true") == "false" or world_params.get("online_mode", "true") == "false"):
+         del ports["25565/tcp"]
+ 
+     container = docker_client.containers.run(
+@@ -177,7 +193,7 @@ async def runworld(request):
+             **paramsFormatted
+         },
+         volumes={
+-            abs_world_dir: {"bind": "/data/world", "mode": "rw"}
++            data_dir: {"bind": "/data", "mode": "rw"}
+         }
+     )
+ 
+@@ -189,7 +205,7 @@ async def runworld(request):
+     if world.domainPrefix != None and settings.BASE_DOMAIN != "undefined":
+         domain = f"{world.domainPrefix}.{settings.BASE_DOMAIN}"
+ 
+-    if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
++    if settings.OFFLINEMODE_ALTWHITELIST and (world_params.get("ONLINE_MODE", "true") == "false" or world_params.get("online_mode", "true") == "false"):
+         mc_port = None
+ 
+     return web.json_response({
+@@ -198,4 +214,4 @@ async def runworld(request):
+         "mc_port": mc_port,
+         "rcon_port": rcon_port,
+         "domain": domain
+-    })
+\ No newline at end of file
++    })
+diff --git a/handlers/stopworld.py b/handlers/stopworld.py
+index 72d494e..a38621d 100644
+--- a/handlers/stopworld.py
++++ b/handlers/stopworld.py
+@@ -2,17 +2,28 @@ from aiohttp import web
+ import docker
+ import os
+ import asyncio
+-from utils import zip_and_upload_world
++from utils import (
++    zip_and_upload_world,
++    get_level_name,
++    get_server_data_dir,
++    get_world_runtime_dir,
++    looks_like_world_dir,
++)
+ from database.crud import get_world, update_world
+ 
+ WORLDS_DIR = "./worlds_tmp"
+ docker_client = docker.from_env()
+ 
+-async def background_save_world(world_id, world_name):
+-    world_dir = os.path.abspath(os.path.join(WORLDS_DIR, world_name))
+-    if os.path.exists(world_dir):
++async def background_save_world(world_id, world_name, level_name):
++    world_dir = os.path.join(get_server_data_dir(WORLDS_DIR, world_name), level_name)
++    legacy_world_dir = get_world_runtime_dir(WORLDS_DIR, world_name)
++
++    if looks_like_world_dir(world_dir):
+         s3_url = await zip_and_upload_world(world_dir, f"mc_world_{world_id}.zip")
+         update_world(world_id, s3URL=s3_url, status="idle")
++    elif looks_like_world_dir(legacy_world_dir):
++        s3_url = await zip_and_upload_world(legacy_world_dir, f"mc_world_{world_id}.zip")
++        update_world(world_id, s3URL=s3_url, status="idle")
+     else:
+         update_world(world_id, status="idle")
+ 
+@@ -27,9 +38,10 @@ async def stopworld(world_id):
+     for c in containers:
+         if c.name == world_name:
+             try:
++                level_name = get_level_name(world)
+                 c.stop()
+                 update_world(world_id, status="updating")
+-                asyncio.create_task(background_save_world(world_id, world_name))
++                asyncio.create_task(background_save_world(world_id, world_name, level_name))
+                 c.remove()
+                 return True
+             except Exception as e:
+@@ -45,4 +57,4 @@ async def stopworldRequest(request):
+         else:
+             return web.json_response({"error": "Container not found"}, status=404)
+     else:
+-        return web.json_response({"error": result}, status=500)
+\ No newline at end of file
++        return web.json_response({"error": result}, status=500)
+diff --git a/utils.py b/utils.py
+index ee427eb..3a89870 100644
+--- a/utils.py
++++ b/utils.py
+@@ -12,6 +12,9 @@ from mcrcon import MCRcon
+ import zipfile
+ import subprocess
+ 
++DEFAULT_LEVEL_NAME = "world"
++SERVER_DATA_DIR_NAME = "data"
++
+ def extract_object_name(s3_url):
+     return urlparse(s3_url).path.lstrip('/')
+ 
+@@ -118,4 +121,25 @@ async def zip_and_upload_world(world_dir: str, r2_name: str = None) -> str:
+     return s3_url
+ 
+ def fix_permissions(world_dir):
+-    subprocess.run(['chmod', '-R', '777', world_dir])
+\ No newline at end of file
++    subprocess.run(['chmod', '-R', '777', world_dir])
++
++def get_level_name(world):
++    params = getattr(world, "params", None)
++    if not isinstance(params, dict):
++        return DEFAULT_LEVEL_NAME
++    return str(params.get("LEVEL_NAME") or params.get("level_name") or DEFAULT_LEVEL_NAME)
++
++def get_world_runtime_dir(worlds_dir, world_name):
++    return os.path.abspath(os.path.join(worlds_dir, world_name))
++
++def get_server_data_dir(worlds_dir, world_name):
++    return os.path.join(get_world_runtime_dir(worlds_dir, world_name), SERVER_DATA_DIR_NAME)
++
++def get_server_world_dir(worlds_dir, world_name, world):
++    return os.path.join(get_server_data_dir(worlds_dir, world_name), get_level_name(world))
++
++def looks_like_world_dir(world_dir):
++    return (
++        os.path.isfile(os.path.join(world_dir, "level.dat")) or
++        os.path.isdir(os.path.join(world_dir, "region"))
++    )
