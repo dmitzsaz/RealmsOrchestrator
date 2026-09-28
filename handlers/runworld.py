@@ -135,6 +135,24 @@ async def runworld(request):
         params.update(world_params)
     paramsFormatted = {k.upper(): v for k, v in params.items()}
 
+    if world_params.get("newAuth") is True:
+        auth_url = os.getenv("MCPROXY_AUTH_URL", "http://mcproxy:8080").rstrip("/")
+        # Keep world.params as the proxy's policy; the backend uses local online auth.
+        paramsFormatted["ONLINE_MODE"] = "true"
+        paramsFormatted["JVM_OPTS"] = (
+            f"{paramsFormatted.get('JVM_OPTS') or ''} "
+            "-Dminecraft.api.env=custom "
+            f"-Dminecraft.api.discovery.host={auth_url}/discovery "
+            "-Dminecraft.api.auth.host=https://authserver.mojang.com "
+            "-Dminecraft.api.account.host=https://api.mojang.com "
+            f"-Dminecraft.api.session.host={auth_url}/session "
+            f"-Dminecraft.api.services.host={auth_url}/services "
+            "-Dminecraft.api.profiles.host=https://api.mojang.com"
+        ).strip()
+        online_mode = world_params.get("ONLINE_MODE", world_params.get("online_mode", True))
+        if online_mode == 0 or str(online_mode).strip().lower() in ("false", "0", "no"):
+            paramsFormatted["ENFORCE_SECURE_PROFILE"] = "false"
+
     if world.status == "init" or world.status == "running":
         while True:
             container = await getDockerContainer(world_name)
