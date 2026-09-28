@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from mcrcon import MCRcon
 import zipfile
 import subprocess
+import json
 
 DEFAULT_LEVEL_NAME = "world"
 SERVER_DATA_DIR_NAME = "data"
@@ -85,11 +86,26 @@ def get_free_port():
         s.bind(('', 0))
         return s.getsockname()[1]
 
-def setup_admins_and_whitelist(rcon_port, admins, players, rcon_password, world):
-    if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
-        return
+def player_list(value):
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = json.loads(value)
+    return list(value) if isinstance(value, list) else []
 
+def uses_proxy_whitelist(world):
+    params = world.params if isinstance(world.params, dict) else {}
+    online_mode = params.get("ONLINE_MODE", params.get("online_mode", True))
+    offline = online_mode == 0 or str(online_mode).strip().lower() in ("false", "0", "no")
+    return offline and (params.get("newAuth") is True or settings.OFFLINEMODE_ALTWHITELIST)
+
+def setup_admins_and_whitelist(rcon_port, admins, players, rcon_password, world):
     with MCRcon("localhost", rcon_password, port=rcon_port) as mcr:
+        if uses_proxy_whitelist(world):
+            # The proxy checks these names. Vanilla's online profile lookup
+            # would put Mojang UUIDs in the whitelist instead of offline UUIDs.
+            mcr.command("whitelist off")
+            return
         mcr.command("whitelist on")
         for admin in admins:
             mcr.command(f"whitelist add {admin}")
@@ -98,9 +114,6 @@ def setup_admins_and_whitelist(rcon_port, admins, players, rcon_password, world)
             mcr.command(f"whitelist add {player}")
 
 def givePlayerOp(rcon_port, player, rcon_password):
-    if settings.OFFLINEMODE_ALTWHITELIST != True:
-        return
-        
     with MCRcon("localhost", rcon_password, port=rcon_port) as mcr:
         mcr.command(f"op {player}")
 

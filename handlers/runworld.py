@@ -10,6 +10,8 @@ from utils import (
     setup_admins_and_whitelist,
     fix_permissions,
     givePlayerOp,
+    player_list,
+    uses_proxy_whitelist,
     get_world_runtime_dir,
     get_server_data_dir,
     get_server_world_dir,
@@ -20,7 +22,6 @@ from database.crud import get_world, update_world
 from handlers.stopworld import stopworld
 from config import settings
 import time
-import json
 
 DOCKER_IMAGE = "itzg/minecraft-server:latest"
 RCON_PASSWORD = os.getenv("RCON_PASSWORD", "minecraft")
@@ -50,8 +51,8 @@ async def monitor_players(rcon_port, container_name, world):
         return
 
     try:
-        admins = json.loads(world.admins) if isinstance(world.admins, str) and world.admins else (world.admins if isinstance(world.admins, list) else [])
-        players = json.loads(world.players) if isinstance(world.players, str) and world.players else (world.players if isinstance(world.players, list) else [])
+        admins = player_list(world.admins)
+        players = player_list(world.players)
 
         setup_admins_and_whitelist(rcon_port, admins, players, RCON_PASSWORD, world)
     except Exception as e:
@@ -61,25 +62,32 @@ async def monitor_players(rcon_port, container_name, world):
     check_interval = 5
     empty_timeout = 5 * 60
 
-    currentPlayers = []
+    currentAdmins = set()
 
     while True:
         try:
             with MCRcon("localhost", RCON_PASSWORD, port=rcon_port) as mcr:
                 resp = mcr.command("list")
 
-                if settings.OFFLINEMODE_ALTWHITELIST and (world.params.get("ONLINE_MODE", "true") == "false" or world.params.get("online_mode", "true") == "false"):
+                if world.params.get("newAuth") is True or uses_proxy_whitelist(world):
                     players_part = resp.split(":", 1)[1].strip() if ":" in resp else ""
                     if players_part:
                         players = [p.strip() for p in players_part.split(",") if p.strip()]
                     else:
                         players = []
 
-                    if currentPlayers != players:
-                        for player in players:
-                            if player in world.admins and player not in currentPlayers:
-                                givePlayerOp(rcon_port, player, RCON_PASSWORD)
-                        currentPlayers = players
+                    current_world = get_world(world.id)
+                    admins = {name.casefold() for name in player_list(current_world.admins)} if current_world else set()
+                    connected_admins = {player.casefold() for player in players if player.casefold() in admins}
+                    for player in players:
+                        name = player.casefold()
+                        if name in connected_admins and name not in currentAdmins:
+                            # Login has populated vanilla's profile cache with
+                            # the actual UUID selected by the proxy.
+                            givePlayerOp(rcon_port, player, RCON_PASSWORD)
+                        elif name in currentAdmins and name not in admins:
+                            mcr.command(f"deop {player}")
+                    currentAdmins = connected_admins
 
                 if "There are 0" in resp:
                     if time.time() - last_players >= empty_timeout:
@@ -112,8 +120,8 @@ def prepareResponse(container):
     return web.json_response({
         "status": container.status,
         "container_id": container.id,
-        "mc_port": int(mc_port),
-        "rcon_port": int(rcon_port),
+        "mc_port": int(mc_port) if mc_port else None,
+        "rcon_port": int(rcon_port) if rcon_port else None,
         "status": container.status
     })
 
@@ -192,7 +200,7 @@ async def runworld(request):
     rcon_port = get_free_port()
 
     ports = {"25565/tcp": mc_port, "25575/tcp": rcon_port}
-    if settings.OFFLINEMODE_ALTWHITELIST and (world_params.get("ONLINE_MODE", "true") == "false" or world_params.get("online_mode", "true") == "false"):
+    if uses_proxy_whitelist(world):
         del ports["25565/tcp"]
 
     container = docker_client.containers.run(
@@ -223,7 +231,7 @@ async def runworld(request):
     if world.domainPrefix != None and settings.BASE_DOMAIN != "undefined":
         domain = f"{world.domainPrefix}.{settings.BASE_DOMAIN}"
 
-    if settings.OFFLINEMODE_ALTWHITELIST and (world_params.get("ONLINE_MODE", "true") == "false" or world_params.get("online_mode", "true") == "false"):
+    if uses_proxy_whitelist(world):
         mc_port = None
 
     return web.json_response({
