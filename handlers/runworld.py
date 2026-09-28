@@ -152,10 +152,10 @@ async def runworld(request):
             "-Dminecraft.api.env=custom "
             f"-Dminecraft.api.discovery.host={auth_url}/discovery "
             "-Dminecraft.api.auth.host=https://authserver.mojang.com "
-            "-Dminecraft.api.account.host=https://api.mojang.com "
+            f"-Dminecraft.api.account.host={auth_url} "
             f"-Dminecraft.api.session.host={auth_url}/session "
             f"-Dminecraft.api.services.host={auth_url}/services "
-            "-Dminecraft.api.profiles.host=https://api.mojang.com"
+            f"-Dminecraft.api.profiles.host={auth_url}"
         ).strip()
         online_mode = world_params.get("ONLINE_MODE", world_params.get("online_mode", True))
         if online_mode == 0 or str(online_mode).strip().lower() in ("false", "0", "no"):
