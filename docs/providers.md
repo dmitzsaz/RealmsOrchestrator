@@ -105,16 +105,22 @@ mcproxy should match the ticket and use that connection exactly as it would use 
 
 The ticket is created by mcproxy before it calls `/connect`, so the agent's connection can never arrive before the ticket is registered. The orchestrator only ever sends the agent to the configured `PROXY_TUNNEL_ADDR`, never to an address chosen by the caller.
 
-### Required mcproxy changes (RealmsOrchestratorProxy)
+### mcproxy setup (RealmsOrchestratorProxy ≥ c0707a8)
 
-The current mcproxy keeps working for `baremetal`. For the other providers it needs these changes:
+| mcproxy env | |
+|---|---|
+| `ORCHESTRATOR_URL` | management API, e.g. `http://orchestrator:8080` (already used for starting worlds) |
+| `INTERNAL_API_TOKEN` | same value as the orchestrator's |
+| `TUNNEL_LISTEN_ADDR` | e.g. `:25570`; must be reachable from the nodes. The orchestrator's `PROXY_TUNNEL_ADDR` is its public `host:port` |
+| `TUNNEL_TLS_CERT`, `TUNNEL_TLS_KEY` | optional TLS for tunnels; set `PROXY_TUNNEL_TLS=true` on the orchestrator |
+| `DOCKER_PROVIDERS` | providers resolved through the local Docker API, default `baremetal` |
 
-1. **Resolve via the orchestrator.** When `worlds.provider` is set and is not `baremetal`, resolve the backend with `/internal/worlds/{id}/connect` instead of the Docker API. Treat 503 as `ErrUnavailable`, which shows the Limbo screen and keeps retrying.
-2. **Tunnel listener.** Add one (e.g. `TUNNEL_LISTEN_ADDR=:25570`, public) that accepts `RTUN1 <ticket>\n` and hands the connection to the waiting login or status request.
-3. **newAuth over tunnels.** `sessionRegistry` binds a session to the backend socket's remote IP, and `hasJoined` is accepted only from that IP. Through a tunnel the socket's peer is the node's NAT address, and the agent relays `hasJoined` through the orchestrator. For tunnel backends:
-   * Bind the session to the world ID instead of the IP.
-   * In `hasJoined`, accept requests that carry `X-Realms-Internal-Token: $INTERNAL_API_TOKEN` and `X-Realms-World-Id: <id>`, and treat that world ID as the requester.
-   * The backend sees players as `127.0.0.1` (the agent's local socket), so skip the `ip=` check for these sessions or expect `127.0.0.1`.
+How mcproxy uses these settings:
+
+* **Resolution.** mcproxy reads `id, provider, status` by `domainPrefix`.
+  * Worlds without a provider, or on a Docker provider, are resolved through Docker exactly as before.
+  * Any other world is reached through `/connect`. While the world is not `running`, it counts as starting: Limbo waits and keeps retrying.
+* **newAuth sessions.** Sessions to orchestrator-placed backends are also bound to the world ID. A relayed `hasJoined` with a valid `X-Realms-Internal-Token` and a matching `X-Realms-World-Id` is accepted. For tunnel backends, the expected `ip=` is `127.0.0.1`.
 
 ## newAuth on remote nodes
 
