@@ -1,38 +1,12 @@
-from mcrcon import MCRcon
 from aiohttp import web
-import docker
 from database.crud import get_world, update_world
 from utils import player_list, uses_proxy_whitelist
-import os
-
-RCON_PASSWORD = os.getenv("RCON_PASSWORD", "minecraft")
-
-docker_client = docker.DockerClient()
-
-def get_running_world_container_and_rcon_port(world_id):
-    world = get_world(world_id)
-    if not world:
-        return None, None
-    world_name = f"minecraft_{world_id}_{world.domainPrefix}"
-    containers = docker_client.containers.list(all=True)
-    for c in containers:
-        if c.name == world_name and c.status == "running":
-            ports = c.attrs.get('NetworkSettings', {}).get('Ports', {})
-            rcon_port = None
-            if "25575/tcp" in ports and ports["25575/tcp"]:
-                rcon_port = int(ports["25575/tcp"][0]["HostPort"])
-            return c, rcon_port
-    return None, None
+from worldmanager import WorldError, manager
 
 async def RCON_command(world_id, command):
-    container, rcon_port = get_running_world_container_and_rcon_port(world_id)
-    if not container or not rcon_port:
-        return {"error": "Мир не запущен или RCON порт не найден"}
     try:
-        with MCRcon("localhost", RCON_PASSWORD, port=rcon_port) as mcr:
-            resp = mcr.command(command)
-        return {"result": resp}
-    except Exception as e:
+        return {"result": await manager.rcon(world_id, command)}
+    except WorldError as e:
         return {"error": str(e)}
 
 async def addAdmin(world_id, admin_nick):

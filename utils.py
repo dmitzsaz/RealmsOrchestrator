@@ -1,41 +1,23 @@
-import boto3
-from botocore.client import Config
-from config import settings
 import aiohttp
 import os
 import uuid
 import asyncio
-import socket
-from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor
-from mcrcon import MCRcon
-import zipfile
-import subprocess
 import json
 
+import storage
+from config import settings
+
 DEFAULT_LEVEL_NAME = "world"
-SERVER_DATA_DIR_NAME = "data"
 
 def extract_object_name(s3_url):
-    return urlparse(s3_url).path.lstrip('/')
+    return storage.object_key(s3_url)
 
 def upload_to_r2_sync(file_path: str, object_name: str) -> str:
-    session = boto3.session.Session()
-    client = session.client(
-        service_name='s3',
-        aws_access_key_id=settings.R2_ACCESS_KEY,
-        aws_secret_access_key=settings.R2_SECRET_KEY,
-        endpoint_url=settings.R2_ENDPOINT,
-        config=Config(signature_version='s3v4'),
-        region_name='auto'
-    )
-    client.upload_file(file_path, settings.R2_BUCKET, object_name)
-    return f"https://{settings.R2_BUCKET}.{settings.R2_ENDPOINT.replace('https://', '')}/{object_name}"
+    storage.client().upload_file(file_path, settings.R2_BUCKET, object_name)
+    return storage.object_url(object_name)
 
 async def upload_to_r2(file_path: str, object_name: str) -> str:
-    loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor() as pool:
-        return await loop.run_in_executor(pool, upload_to_r2_sync, file_path, object_name)
+    return await asyncio.to_thread(upload_to_r2_sync, file_path, object_name)
 
 async def download_file(url: str, dest_folder: str = "/tmp") -> str:
     filename = os.path.basename(url)
@@ -54,37 +36,10 @@ async def download_file(url: str, dest_folder: str = "/tmp") -> str:
     return dest_path
 
 def generate_presigned_url(object_name: str, expires_in: int = 3600) -> str:
-    session = boto3.session.Session()
-    client = session.client(
-        service_name='s3',
-        aws_access_key_id=settings.R2_ACCESS_KEY,
-        aws_secret_access_key=settings.R2_SECRET_KEY,
-        endpoint_url=settings.R2_ENDPOINT,
-        config=Config(signature_version='s3v4'),
-        region_name='auto'
-    )
-    return client.generate_presigned_url(
-        'get_object',
-        Params={'Bucket': settings.R2_BUCKET, 'Key': object_name},
-        ExpiresIn=expires_in
-    )
+    return storage.presign_get(object_name, expires_in)
 
 def download_from_r2(object_name: str, dest_path: str) -> None:
-    session = boto3.session.Session()
-    client = session.client(
-        service_name='s3',
-        aws_access_key_id=settings.R2_ACCESS_KEY,
-        aws_secret_access_key=settings.R2_SECRET_KEY,
-        endpoint_url=settings.R2_ENDPOINT,
-        config=Config(signature_version='s3v4'),
-        region_name='auto'
-    )
-    client.download_file(settings.R2_BUCKET, object_name, dest_path)
-
-def get_free_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
-        return s.getsockname()[1]
+    storage.client().download_file(settings.R2_BUCKET, object_name, dest_path)
 
 def player_list(value):
     if not value:
@@ -93,66 +48,21 @@ def player_list(value):
         value = json.loads(value)
     return list(value) if isinstance(value, list) else []
 
+def world_params(world):
+    return world.params if isinstance(world.params, dict) else {}
+
+def is_newauth(world):
+    return world_params(world).get("newAuth") is True
+
 def uses_proxy_whitelist(world):
-    params = world.params if isinstance(world.params, dict) else {}
+    params = world_params(world)
     online_mode = params.get("ONLINE_MODE", params.get("online_mode", True))
     offline = online_mode == 0 or str(online_mode).strip().lower() in ("false", "0", "no")
     return offline and (params.get("newAuth") is True or settings.OFFLINEMODE_ALTWHITELIST)
 
-def setup_admins_and_whitelist(rcon_port, admins, players, rcon_password, world):
-    with MCRcon("localhost", rcon_password, port=rcon_port) as mcr:
-        if uses_proxy_whitelist(world):
-            # The proxy checks these names. Vanilla's online profile lookup
-            # would put Mojang UUIDs in the whitelist instead of offline UUIDs.
-            mcr.command("whitelist off")
-            return
-        mcr.command("whitelist on")
-        for admin in admins:
-            mcr.command(f"whitelist add {admin}")
-            mcr.command(f"op {admin}")
-        for player in players:
-            mcr.command(f"whitelist add {player}")
-
-def givePlayerOp(rcon_port, player, rcon_password):
-    with MCRcon("localhost", rcon_password, port=rcon_port) as mcr:
-        mcr.command(f"op {player}")
-
-async def zip_and_upload_world(world_dir: str, r2_name: str = None) -> str:
-    if not r2_name:
-        r2_name = f"world_{uuid.uuid4()}.zip"
-    temp_zip = os.path.join("/tmp", r2_name)
-
-    with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(world_dir):
-            for file in files:
-                abs_path = os.path.join(root, file)
-                rel_path = os.path.relpath(abs_path, world_dir)
-                zipf.write(abs_path, rel_path)
-    # Загружаем архив на R2
-    s3_url = await upload_to_r2(temp_zip, r2_name)
-    os.remove(temp_zip)
-    return s3_url
-
-def fix_permissions(world_dir):
-    subprocess.run(['chmod', '-R', '777', world_dir])
-
 def get_level_name(world):
-    params = getattr(world, "params", None)
-    if not isinstance(params, dict):
-        return DEFAULT_LEVEL_NAME
-    return str(params.get("LEVEL_NAME") or params.get("level_name") or DEFAULT_LEVEL_NAME)
-
-def get_world_runtime_dir(worlds_dir, world_name):
-    return os.path.abspath(os.path.join(worlds_dir, world_name))
-
-def get_server_data_dir(worlds_dir, world_name):
-    return os.path.join(get_world_runtime_dir(worlds_dir, world_name), SERVER_DATA_DIR_NAME)
-
-def get_server_world_dir(worlds_dir, world_name, world):
-    return os.path.join(get_server_data_dir(worlds_dir, world_name), get_level_name(world))
-
-def looks_like_world_dir(world_dir):
-    return (
-        os.path.isfile(os.path.join(world_dir, "level.dat")) or
-        os.path.isdir(os.path.join(world_dir, "region"))
-    )
+    params = world_params(world)
+    for key in ("LEVEL_NAME", "level_name", "LEVEL", "level"):
+        if params.get(key):
+            return str(params[key])
+    return DEFAULT_LEVEL_NAME

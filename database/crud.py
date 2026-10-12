@@ -2,6 +2,8 @@ from typing import Optional, List
 from .db import SessionLocal
 from .models import World
 
+RUNTIME_FIELDS = ("provider", "ports", "ips", "instanceId", "sessionId")
+
 def get_worlds() -> List[World]:
     with SessionLocal() as session:
         return session.query(World).all()
@@ -31,6 +33,17 @@ def update_world(world_id: int, **kwargs) -> World:
         session.commit()
         session.refresh(world)
         return world
+
+def clear_runtime(world_id: int, **kwargs) -> World:
+    """Drops the runtime placement (SQL NULL) together with any other updates."""
+    return update_world(world_id, **{field: None for field in RUNTIME_FIELDS}, **kwargs)
+
+def get_placed_worlds() -> List[World]:
+    """Worlds that may still have a workload on some provider."""
+    with SessionLocal() as session:
+        return session.query(World).filter(
+            (World.instanceId.isnot(None)) | (World.status.in_(("init", "running", "updating")))
+        ).all()
 
 def delete_world(world_id: int) -> bool:
     with SessionLocal() as session:

@@ -1,7 +1,5 @@
-from sqlalchemy import Column, Integer, String, JSON, BigInteger, ForeignKey, DateTime
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, JSON
 from database.db import Base
-from datetime import datetime
 
 
 class World(Base):
@@ -15,3 +13,11 @@ class World(Base):
     players = Column(JSON, nullable=False, default=list)
     params = Column(JSON, nullable=False, default={})
     domainPrefix = Column(String(255), nullable=True, unique=False)
+
+    # Runtime placement: set while the world runs, SQL NULL once it is stopped.
+    # none_as_null stores Python None as NULL instead of the JSON literal 'null'.
+    provider = Column(String(64), nullable=True)
+    ports = Column(JSON(none_as_null=True), nullable=True)
+    ips = Column(JSON(none_as_null=True), nullable=True)
+    instanceId = Column(String(255), nullable=True)
+    sessionId = Column(String(64), nullable=True)
