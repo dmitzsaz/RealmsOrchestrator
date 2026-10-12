@@ -37,13 +37,13 @@ jobs:
     concurrency:
       group: runtime-image-${{ matrix.ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ matrix.ref }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -78,14 +78,17 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - if: steps.check.outputs.build == 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - if: steps.check.outputs.build == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: agent
           platforms: linux/amd64,linux/arm64
           push: true
+          # No attestation manifests (unknown/unknown) in the index: some
+          # runtimes, e.g. Proxmox's OCI pull, may not expect them.
+          provenance: false
           # Pinned to the digest checked above, so the label tells the truth.
           build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}@${{ steps.check.outputs.base }}
           tags: |
