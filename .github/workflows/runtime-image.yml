@@ -1,0 +1,111 @@
+# Builds ghcr.io/<owner>/realms-runtime (itzg/minecraft-server + agent/):
+# :dev from dev, :latest from the default branch, plus :sha-<commit>.
+#
+# Minecraft is not in the image: itzg downloads it at every world start
+# (VERSION, LATEST by default). So the image only needs a rebuild when agent/
+# changes or itzg publishes a new base image. The daily run only compares the
+# base digest with the one recorded in our image and builds when it changed.
+# Scheduled runs use the workflow file on the default branch.
+name: Runtime image
+
+on:
+  push:
+    branches: [dev, master]
+    paths:
+      - "agent/**"
+      - ".github/workflows/runtime-image.yml"
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  BASE_IMAGE: docker.io/itzg/minecraft-server:latest
+  BASE_LABEL: org.opencontainers.image.base.digest
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Scheduled runs check both long-lived branches; pushes build their own.
+        ref: ${{ fromJSON(github.event_name == 'schedule' && format('["{0}","dev"]', github.ref_name) || format('["{0}"]', github.ref_name)) }}
+    concurrency:
+      group: runtime-image-${{ matrix.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide
+        id: check
+        env:
+          REF: ${{ matrix.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || github.ref_name }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/realms-runtime"
+          if [ "$REF" = "$DEFAULT_BRANCH" ]; then tag=latest; else tag="$REF"; fi
+          base=$(docker buildx imagetools inspect "$BASE_IMAGE" --format '{{json .Manifest}}' | jq -r '.digest // empty')
+          if [ -z "$base" ]; then echo "::error::Cannot resolve $BASE_IMAGE"; exit 1; fi
+          built=$(docker buildx imagetools inspect "$image:$tag" --format '{{json .Image}}' 2>/dev/null \
+            | jq -r --arg l "$BASE_LABEL" '(.["linux/amd64"] // .).config.Labels[$l] // empty' || true)
+          echo "base $base, $image:$tag built on ${built:-nothing}"
+          build=true
+          if [ ! -f agent/Dockerfile ]; then
+            echo "No agent/ on $REF"; build=false
+          elif [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$base" = "$built" ]; then
+            echo "Base image unchanged"; build=false
+          fi
+          {
+            echo "build=$build"
+            echo "base=$base"
+            echo "image=$image"
+            echo "tag=$tag"
+            echo "sha=$(git rev-parse HEAD)"
+            echo "short=$(git rev-parse --short=7 HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - if: steps.check.outputs.build == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - if: steps.check.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: agent
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # Pinned to the digest checked above, so the label tells the truth.
+          build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}@${{ steps.check.outputs.base }}
+          tags: |
+            ${{ steps.check.outputs.image }}:${{ steps.check.outputs.tag }}
+            ${{ steps.check.outputs.image }}:sha-${{ steps.check.outputs.short }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.check.outputs.sha }}
+            org.opencontainers.image.base.name=${{ env.BASE_IMAGE }}
+            ${{ env.BASE_LABEL }}=${{ steps.check.outputs.base }}
+          cache-from: type=gha,scope=${{ matrix.ref }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.ref }}
+
+      # The scheduled check skips builds by reading this label back.
+      - if: steps.check.outputs.build == 'true'
+        name: Verify base label
+        env:
+          IMAGE: ${{ steps.check.outputs.image }}:${{ steps.check.outputs.tag }}
+          BASE: ${{ steps.check.outputs.base }}
+        run: |
+          built=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image}}' \
+            | jq -r --arg l "$BASE_LABEL" '(.["linux/amd64"] // .).config.Labels[$l] // empty')
+          if [ "$built" != "$BASE" ]; then echo "::error::$IMAGE label is '$built', expected $BASE"; exit 1; fi

@@ -6,3 +6,4 @@ pydantic-settings>=2.0
 sqlalchemy>=1.4
 pymysql>=1.0
 docker>=6.0
+cryptography>=42

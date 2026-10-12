@@ -23,8 +23,9 @@ async def connect(request):
             body = await request.json()
         except ValueError:
             return web.json_response({"error": "invalid JSON"}, status=400)
+    body = body if isinstance(body, dict) else {}
     try:
-        result = await manager.connect(request.match_info.get("world_id"), (body or {}).get("ticket"))
+        result = await manager.connect(request.match_info.get("world_id"), body.get("ticket"), body.get("tls_sha256"))
     except WorldError as e:
         return web.json_response({"error": str(e)}, status=e.status)
     return web.json_response(result)

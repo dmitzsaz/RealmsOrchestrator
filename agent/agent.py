@@ -12,6 +12,8 @@ Every connection is outbound, so the node needs no public address.
 """
 import asyncio
 import base64
+import hashlib
+import hmac
 import itertools
 import json
 import logging
@@ -32,6 +34,8 @@ from yarl import URL
 
 ORCHESTRATOR_URL = os.environ["REALMS_ORCHESTRATOR_URL"].rstrip("/")
 TOKEN = os.environ["REALMS_AGENT_TOKEN"]
+# SHA-256 of the orchestrator's self-signed certificate; accepted instead of a CA.
+ORCHESTRATOR_PIN = os.environ.get("REALMS_ORCHESTRATOR_TLS_SHA256", "").strip().lower()
 SESSION_ID = TOKEN.split(".")[1]
 DATA_DIR = os.environ.get("REALMS_DATA_DIR", "/data")
 MC_COMMAND = os.environ.get("REALMS_MC_COMMAND", "/start").split()
@@ -238,10 +242,11 @@ class Agent:
     async def control_loop(self) -> None:
         url = URL(ORCHESTRATOR_URL + "/agent/v1/ws")
         url = url.with_scheme({"http": "ws", "https": "wss"}.get(url.scheme, url.scheme))
+        tls = aiohttp.Fingerprint(bytes.fromhex(ORCHESTRATOR_PIN)) if ORCHESTRATOR_PIN else True
         backoff = 1
         while not self.done.is_set():
             try:
-                async with self.http.ws_connect(url, headers={"Authorization": f"Bearer {TOKEN}"},
+                async with self.http.ws_connect(url, headers={"Authorization": f"Bearer {TOKEN}"}, ssl=tls,
                                                 heartbeat=20, max_msg_size=16 * 1024 * 1024) as ws:
                     self.ws, backoff = ws, 1
                     log.info("Connected to the orchestrator")
@@ -258,6 +263,8 @@ class Agent:
                     self.spawn(self.abandon())
                     return
                 log.warning("Orchestrator handshake failed: HTTP %s", e.status)
+            except aiohttp.ServerFingerprintMismatch:
+                log.error("Orchestrator certificate does not match REALMS_ORCHESTRATOR_TLS_SHA256")
             except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as e:
                 log.warning("Orchestrator unreachable: %s", e)
             except Exception:
@@ -580,15 +587,25 @@ class Agent:
         host = host.strip("[]")
         local_reader, local_writer = await asyncio.wait_for(
             asyncio.open_connection("127.0.0.1", SERVER_PORT), 5)
+        pin = str(msg.get("tls_sha256") or "").lower()
         try:
-            kwargs = {}
-            if msg.get("tls"):
-                kwargs = {"ssl": ssl.create_default_context(), "server_hostname": host}
+            context = None
+            if pin:
+                # mcproxy's certificate is self-signed; the pin below replaces CA checks.
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
             remote_reader, remote_writer = await asyncio.wait_for(
-                asyncio.open_connection(host, int(port), **kwargs), 10)
+                asyncio.open_connection(host, int(port), ssl=context), 10)
         except BaseException:
             local_writer.close()
             raise
+        if pin:
+            cert = remote_writer.get_extra_info("ssl_object").getpeercert(binary_form=True) or b""
+            if not hmac.compare_digest(hashlib.sha256(cert).hexdigest(), pin):
+                remote_writer.close()
+                local_writer.close()
+                raise ConnectionError("tunnel certificate does not match mcproxy's fingerprint")
         remote_writer.write(f"RTUN1 {ticket}\n".encode())
         await remote_writer.drain()
         self.spawn(splice(local_reader, local_writer, remote_reader, remote_writer))

@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     ORCHESTRATOR_PUBLIC_URL: str = "http://host.docker.internal:8081"
     # Signs per-session agent tokens. Derived from R2_SECRET_KEY when empty.
     AGENT_SECRET: str = ""
+    # Serve AGENT_LISTEN_PORT over TLS with a certificate derived from
+    # AGENT_SECRET that agents pin (agenttls.py); http:// agent URLs are then
+    # used as https://. Disable only behind a TLS terminator with a real
+    # certificate and an https:// URL.
+    AGENT_TLS: bool = True
 
     MCPROXY_AUTH_URL: str = "http://mcproxy:8080"
     # mcproxy's AUTH_PUBLIC_URL, rewritten in relayed /discovery responses.
@@ -46,8 +51,8 @@ class Settings(BaseSettings):
     # Shared with mcproxy for /internal/*. The internal API is disabled when empty.
     INTERNAL_API_TOKEN: str = ""
     # mcproxy's reverse tunnel listener as reachable from the nodes (host:port).
+    # mcproxy sends its certificate fingerprint with every /connect.
     PROXY_TUNNEL_ADDR: str = ""
-    PROXY_TUNNEL_TLS: bool = False
 
     # Crash-safety snapshots uploaded to R2 under temp/. 0 disables them.
     TEMP_SAVE_INTERVAL_MINUTES: int = 10
@@ -62,6 +67,15 @@ class Settings(BaseSettings):
     @property
     def enabled_providers(self) -> list[str]:
         return [p.strip() for p in self.ENABLED_PROVIDERS.split(",") if p.strip()]
+
+    @property
+    def separate_agent_listener(self) -> bool:
+        return self.AGENT_LISTEN_PORT not in (0, self.LISTEN_PORT)
+
+    @property
+    def agent_tls(self) -> bool:
+        # A shared listener would put the management API on TLS too.
+        return self.AGENT_TLS and self.separate_agent_listener
 
     @property
     def agent_secret(self) -> bytes:

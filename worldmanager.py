@@ -21,6 +21,7 @@ from typing import Optional
 
 import aiohttp
 
+import agenttls
 import storage
 from agenthub import AgentDisconnected, AgentError, AgentHub, make_token
 from config import settings
@@ -36,6 +37,7 @@ TEMP_URL_TTL = 12 * 3600
 # World params that select orchestrator behaviour instead of server env.
 ORCHESTRATOR_PARAMS = {"PROVIDER"}
 TICKET_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class WorldError(Exception):
@@ -206,8 +208,12 @@ class WorldManager:
             raise WorldError(f"RCON: {str(e) or 'timeout'}", 502)
         return reply.get("result", "")
 
-    async def connect(self, world_id, ticket: Optional[str]) -> dict:
-        """Tells mcproxy how to reach a running world (see docs/providers.md)."""
+    async def connect(self, world_id, ticket: Optional[str], tls_sha256: Optional[str] = None) -> dict:
+        """Tells mcproxy how to reach a running world (see docs/providers.md).
+
+        tls_sha256 is the fingerprint of mcproxy's tunnel certificate; the
+        agent opens TLS and accepts only that certificate.
+        """
         world = self._get(world_id)
         provider = self.providers.get(world.provider) if world.provider else None
         if provider is None or not world.instanceId or world.status != "running":
@@ -219,6 +225,10 @@ class WorldManager:
             return {"mode": "direct", "address": address}
         if not ticket or not TICKET_RE.match(ticket):
             raise WorldError("A ticket ([A-Za-z0-9_-]{16,128}) is required for tunnel worlds", 400)
+        if tls_sha256 is not None:
+            tls_sha256 = str(tls_sha256).lower()
+            if not FINGERPRINT_RE.match(tls_sha256):
+                raise WorldError("tls_sha256 must be a hex SHA-256", 400)
         if not settings.PROXY_TUNNEL_ADDR:
             raise WorldError("PROXY_TUNNEL_ADDR is not configured", 500)
         conn = self.hub.get(world.id)
@@ -226,7 +236,7 @@ class WorldManager:
             raise WorldError("World agent is not connected", 503)
         try:
             await conn.call("tunnel", ticket=ticket, addr=settings.PROXY_TUNNEL_ADDR,
-                            tls=settings.PROXY_TUNNEL_TLS, timeout=15)
+                            tls_sha256=tls_sha256, timeout=15)
         except (AgentError, asyncio.TimeoutError) as e:
             raise WorldError(f"Tunnel failed: {str(e) or 'timeout'}", 502)
         return {"mode": "tunnel"}
@@ -313,6 +323,13 @@ class WorldManager:
             if online_mode == 0 or str(online_mode).strip().lower() in ("false", "0", "no"):
                 env["ENFORCE_SECURE_PROFILE"] = "false"
 
+        orchestrator_url, pin = provider.orchestrator_url, ""
+        if settings.agent_tls:
+            # Always TLS; the pin replaces CA and hostname checks.
+            if orchestrator_url.startswith("http://"):
+                orchestrator_url = "https://" + orchestrator_url[len("http://"):]
+            pin = agenttls.fingerprint()
+
         # The agent depends on these, so world params cannot override them.
         env.update({
             "LEVEL": get_level_name(world),
@@ -320,7 +337,8 @@ class WorldManager:
             "ENABLE_RCON": "true",
             "RCON_PORT": 25575,
             "RCON_PASSWORD": secrets.token_urlsafe(18),
-            "REALMS_ORCHESTRATOR_URL": provider.orchestrator_url,
+            "REALMS_ORCHESTRATOR_URL": orchestrator_url,
+            "REALMS_ORCHESTRATOR_TLS_SHA256": pin,
             "REALMS_AGENT_TOKEN": make_token(world.id, session_id),
         })
         return LaunchSpec(

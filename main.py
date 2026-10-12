@@ -2,6 +2,7 @@ import logging
 
 from aiohttp import web
 
+import agenttls
 from handlers.worlds import worlds
 from handlers.runworld import runworld
 from handlers.stopworld import stopworldRequest, backupworld
@@ -45,22 +46,24 @@ app.add_routes(routes)
 # Agents on remote providers must reach this listener; keeping it separate
 # lets the management API above stay internal.
 agent_routes = [web.get('/agent/v1/ws', hub.handle_ws)]
-separate_agent_listener = settings.AGENT_LISTEN_PORT not in (0, settings.LISTEN_PORT)
 agent_app = web.Application()
-if separate_agent_listener:
+if settings.separate_agent_listener:
     agent_app.add_routes(agent_routes)
 else:
     app.add_routes(agent_routes)
+    if settings.AGENT_TLS:
+        logging.warning("AGENT_LISTEN_PORT is the management port: agent connections are not encrypted")
 agent_runner_key = web.AppKey("agent_runner", web.AppRunner)
 
 async def on_startup(app):
     # Reconcile before agents can connect, so every placed world is known.
     await manager.startup()
-    if separate_agent_listener:
+    if settings.separate_agent_listener:
         runner = web.AppRunner(agent_app)
         await runner.setup()
+        ssl_context = agenttls.server_context() if settings.agent_tls else None
         for host in settings.LISTEN_ADDR:
-            await web.TCPSite(runner, host, settings.AGENT_LISTEN_PORT).start()
+            await web.TCPSite(runner, host, settings.AGENT_LISTEN_PORT, ssl_context=ssl_context).start()
         app[agent_runner_key] = runner
 
 async def on_shutdown(app):

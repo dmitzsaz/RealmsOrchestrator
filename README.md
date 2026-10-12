@@ -28,10 +28,9 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Build the runtime image and push it to a registry your providers can pull from:
+The runtime image (`ghcr.io/<owner>/realms-runtime:dev`) is built by GitHub Actions on every push to `agent/`. To build it yourself:
 ```bash
-docker build -t ghcr.io/<you>/realms-runtime:dev agent/
-docker push ghcr.io/<you>/realms-runtime:dev
+docker buildx build --platform linux/amd64 -t ghcr.io/<you>/realms-runtime:dev --push agent/
 ```
 
 ### 2. Configure `.env` or `config.py`
@@ -54,7 +53,8 @@ ENABLED_PROVIDERS=baremetal,northflank
 DEFAULT_PROVIDER=baremetal
 # Agents connect here; the only port remote providers must reach.
 AGENT_LISTEN_PORT=8081
-ORCHESTRATOR_PUBLIC_URL=https://agents.example.com
+# TLS is built in and pinned by the agents, no certificate needed.
+ORCHESTRATOR_PUBLIC_URL=http://<public-ip>:8081
 AGENT_SECRET=<random>
 TEMP_SAVE_INTERVAL_MINUTES=10
 
